@@ -22,9 +22,13 @@ class _RentalFormPageState extends State<RentalFormPage> {
   final service = SupabaseService();
   final currency = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ');
 
+  // Perhitungan hari: Tanggal yang sama = 1 hari. 26 ke 27 = 1 hari.
   void _updateTotal() {
-    if (startDate != null && endDate != null && endDate!.isAfter(startDate!)) {
-      final int days = endDate!.difference(startDate!).inDays + 1;
+    if (startDate != null && endDate != null) {
+      final int diff = endDate!.difference(startDate!).inDays;
+      // Jika ingin 26 ke 26 dihitung 1 hari, dan 26 ke 27 dihitung 1 hari:
+      final int days = diff <= 0 ? 1 : diff; 
+      
       totalPrice = quantity * days * widget.product.pricePerDay;
     } else {
       totalPrice = 0.0;
@@ -33,15 +37,16 @@ class _RentalFormPageState extends State<RentalFormPage> {
   }
 
   Future<void> _pickDate(bool isStart) async {
+    final DateTime now = DateTime.now();
     final DateTime initialDate = isStart
-        ? (startDate ?? DateTime.now())
-        : (endDate ?? DateTime.now().add(const Duration(days: 1)));
+        ? (startDate ?? now)
+        : (endDate ?? (startDate?.add(const Duration(days: 1)) ?? now.add(const Duration(days: 1))));
 
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: initialDate,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 90)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 90)),
       locale: const Locale('id', 'ID'),
     );
 
@@ -49,7 +54,6 @@ class _RentalFormPageState extends State<RentalFormPage> {
       setState(() {
         if (isStart) {
           startDate = picked;
-          // Reset tanggal selesai jika lebih awal dari tanggal mulai
           if (endDate != null && endDate!.isBefore(picked)) {
             endDate = null;
           }
@@ -62,25 +66,9 @@ class _RentalFormPageState extends State<RentalFormPage> {
   }
 
   Future<void> _submit() async {
-    // Validasi quantity
-    if (quantity > widget.product.stock) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Jumlah melebihi stok tersedia (${widget.product.stock} unit)')),
-      );
-      return;
-    }
-
-    // Validasi tanggal
     if (startDate == null || endDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pilih tanggal mulai dan selesai sewa')),
-      );
-      return;
-    }
-
-    if (endDate!.isBefore(startDate!)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tanggal selesai harus setelah tanggal mulai')),
+        const SnackBar(content: Text('Silakan pilih tanggal sewa terlebih dahulu')),
       );
       return;
     }
@@ -88,21 +76,17 @@ class _RentalFormPageState extends State<RentalFormPage> {
     setState(() => isLoading = true);
 
     try {
-      // Kurangi stok
-      final int newStock = widget.product.stock - quantity;
-      await service.updateProductStock(widget.product.id, newStock);
+      final int diff = endDate!.difference(startDate!).inDays;
+      final int finalDays = diff <= 0 ? 1 : diff;
 
-      // Hitung durasi
-      final int days = endDate!.difference(startDate!).inDays + 1;
-
-      // Insert pesanan
       final orderData = {
-        'user_id': 'guest-user',
+        'user_id': null, // Sesuaikan jika Anda sudah memiliki Auth
         'product_id': widget.product.id,
         'quantity': quantity,
-        'start_date': startDate!.toIso8601String(),
-        'end_date': endDate!.toIso8601String(),
-        'days': days,
+        // Gunakan format yyyy-MM-dd agar sesuai tipe DATE di Postgres
+        'start_date': DateFormat('yyyy-MM-dd').format(startDate!),
+        'end_date': DateFormat('yyyy-MM-dd').format(endDate!),
+        'days': finalDays, // Sekarang mengirim INTEGER
         'total_price': totalPrice,
         'status': 'pending',
         'payment_status': 'unpaid',
@@ -110,13 +94,14 @@ class _RentalFormPageState extends State<RentalFormPage> {
         'created_at': DateTime.now().toIso8601String(),
       };
 
+      // Pastikan di SupabaseService Anda menggunakan: supabase.from('pesan').insert(data)
       await service.createOrder(orderData);
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Sewa $quantity unit berhasil dibuat!'),
+          content: Text('Sewa Berhasil! Durasi: $finalDays hari'),
           backgroundColor: Colors.green,
         ),
       );
@@ -124,227 +109,101 @@ class _RentalFormPageState extends State<RentalFormPage> {
       Navigator.popUntil(context, (route) => route.isFirst);
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Gagal menyewa: $e'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text('Gagal menyewa: $e'), backgroundColor: Colors.red),
       );
     } finally {
-      if (mounted) {
-        setState(() => isLoading = false);
-      }
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final int days = (startDate != null && endDate != null && endDate!.isAfter(startDate!))
-        ? endDate!.difference(startDate!).inDays + 1
-        : 0;
+    final int diff = (startDate != null && endDate != null) ? endDate!.difference(startDate!).inDays : 0;
+    final int displayDays = diff <= 0 && startDate != null && endDate != null ? 1 : diff;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Form Sewa Alat'),
-      ),
+      appBar: AppBar(title: const Text('Form Sewa Alat')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Gambar Produk
-            Center(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: widget.product.imageUrl != null
-                    ? Image.network(
-                        widget.product.imageUrl!,
-                        height: 200,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return const SizedBox(
-                            height: 200,
-                            child: Center(child: CircularProgressIndicator()),
-                          );
-                        },
-                        errorBuilder: (_, __, ___) => Container(
-                          height: 200,
-                          color: Colors.grey[300],
-                          child: const Icon(Icons.sports_soccer, size: 80),
-                        ),
-                      )
-                    : Container(
-                        height: 200,
-                        color: Colors.grey[300],
-                        child: const Icon(Icons.sports_soccer, size: 80),
-                      ),
-              ),
-            ),
-            const SizedBox(height: 20),
+            // Header Info Produk
+            Text(widget.product.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            Text('Harga: ${currency.format(widget.product.pricePerDay)} / hari'),
+            const Divider(height: 30),
 
-            // Info Produk
-            Text(
-              widget.product.name,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text('Kategori: ${widget.product.category}'),
-            Text(
-              'Stok tersedia: ${widget.product.stock} unit',
-              style: TextStyle(
-                color: widget.product.stock >= quantity ? Colors.green : Colors.red,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            Text('Harga: ${currency.format(widget.product.pricePerDay)} / hari / unit'),
-
-            const Divider(height: 40),
-
-            // Quantity Picker
-            const Text('Jumlah Barang yang Disewa', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
+            // Pilih Jumlah
+            const Text('Jumlah Barang', style: TextStyle(fontWeight: FontWeight.bold)),
             Row(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  onPressed: quantity > 1 ? () => setState(() => quantity--) : null,
-                  icon: const Icon(Icons.remove_circle_outline, size: 40),
-                  color: quantity > 1 ? Colors.blue : Colors.grey,
+                  onPressed: quantity > 1 ? () => setState(() { quantity--; _updateTotal(); }) : null,
+                  icon: const Icon(Icons.remove_circle),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  child: Text(
-                    '$quantity',
-                    style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold),
-                  ),
-                ),
+                Text('$quantity', style: const TextStyle(fontSize: 20)),
                 IconButton(
-                  onPressed: quantity < widget.product.stock ? () => setState(() => quantity++) : null,
-                  icon: const Icon(Icons.add_circle_outline, size: 40),
-                  color: quantity < widget.product.stock ? Colors.blue : Colors.grey,
+                  onPressed: quantity < widget.product.stock ? () => setState(() { quantity++; _updateTotal(); }) : null,
+                  icon: const Icon(Icons.add_circle),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Center(
-              child: Text(
-                'Maksimal: ${widget.product.stock} unit',
-                style: const TextStyle(color: Colors.grey),
-              ),
+
+            // Pilih Tanggal
+            ListTile(
+              leading: const Icon(Icons.date_range),
+              title: Text(startDate == null ? 'Pilih Tanggal Mulai' : DateFormat('dd MMM yyyy').format(startDate!)),
+              onTap: () => _pickDate(true),
+              tileColor: Colors.grey[100],
+            ),
+            const SizedBox(height: 10),
+            ListTile(
+              leading: const Icon(Icons.date_range),
+              title: Text(endDate == null ? 'Pilih Tanggal Selesai' : DateFormat('dd MMM yyyy').format(endDate!)),
+              onTap: () => _pickDate(false),
+              tileColor: Colors.grey[100],
             ),
 
-            const SizedBox(height: 24),
-
-            // Tanggal Mulai
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.calendar_today, color: Colors.blue),
-                title: Text(
-                  startDate == null
-                      ? 'Pilih Tanggal Mulai Sewa'
-                      : DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(startDate!),
-                ),
-                subtitle: startDate == null ? const Text('Wajib dipilih') : null,
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _pickDate(true),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Tanggal Selesai
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.calendar_month, color: Colors.green),
-                title: Text(
-                  endDate == null
-                      ? 'Pilih Tanggal Selesai Sewa'
-                      : DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(endDate!),
-                ),
-                subtitle: endDate == null ? const Text('Wajib dipilih') : null,
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _pickDate(false),
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Ringkasan Harga
-            if (days > 0)
-              Card(
+            const SizedBox(height: 30),
+            
+            // Ringkasan Bayar
+            if (startDate != null && endDate != null) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
                 color: Colors.blue[50],
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Jumlah Barang'),
-                          Text('$quantity unit', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Durasi Sewa'),
-                          Text('$days hari', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Harga per Hari/Unit'),
-                          Text(currency.format(widget.product.pricePerDay)),
-                        ],
-                      ),
-                      const Divider(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Total Harga', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          Text(
-                            currency.format(totalPrice),
-                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blue),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [const Text('Durasi:'), Text('$displayDays hari')],
+                    ),
+                    const Divider(),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Total Bayar:', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text(currency.format(totalPrice), style: const TextStyle(fontSize: 18, color: Colors.blue, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ],
                 ),
               ),
+            ],
 
-            const SizedBox(height: 40),
-
-            // Tombol Sewa
+            const SizedBox(height: 20),
+            
             SizedBox(
               width: double.infinity,
-              height: 52,
+              height: 50,
               child: ElevatedButton(
                 onPressed: isLoading ? null : _submit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: isLoading
-                    ? const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-                          SizedBox(width: 16),
-                          Text('Memproses...', style: TextStyle(color: Colors.white, fontSize: 18)),
-                        ],
-                      )
-                    : Text(
-                        'Sewa Sekarang (${currency.format(totalPrice)})',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                child: isLoading 
+                  ? const CircularProgressIndicator(color: Colors.white) 
+                  : const Text('Sewa Sekarang', style: TextStyle(color: Colors.white)),
               ),
-            ),
+            )
           ],
         ),
       ),

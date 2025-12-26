@@ -25,4 +25,11 @@ class SupabaseService {
         .select()
         .eq('user_id', userId);
   }
+  // update stock
+  Future<void> updateProductStock(String productId, int newStock) async {
+  await supabase
+      .from('products')
+      .update({'stock': newStock})
+      .eq('id', productId);
+  }
 }

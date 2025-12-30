@@ -22,11 +22,9 @@ class _RentalFormPageState extends State<RentalFormPage> {
   final service = SupabaseService();
   final currency = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ');
 
-  // Perhitungan hari: Tanggal yang sama = 1 hari. 26 ke 27 = 1 hari.
   void _updateTotal() {
     if (startDate != null && endDate != null) {
       final int diff = endDate!.difference(startDate!).inDays;
-      // Jika ingin 26 ke 26 dihitung 1 hari, dan 26 ke 27 dihitung 1 hari:
       final int days = diff <= 0 ? 1 : diff; 
       
       totalPrice = quantity * days * widget.product.pricePerDay;
@@ -65,6 +63,7 @@ class _RentalFormPageState extends State<RentalFormPage> {
     }
   }
 
+  // FUNGSI SUBMIT: Pesan -> Update Stok -> Simpan Riwayat
   Future<void> _submit() async {
     if (startDate == null || endDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -79,33 +78,48 @@ class _RentalFormPageState extends State<RentalFormPage> {
       final int diff = endDate!.difference(startDate!).inDays;
       final int finalDays = diff <= 0 ? 1 : diff;
 
+      // 1. Simpan ke tabel 'pesan'
       final orderData = {
-        'user_id': null, // Sesuaikan jika Anda sudah memiliki Auth
         'product_id': widget.product.id,
         'quantity': quantity,
-        // Gunakan format yyyy-MM-dd agar sesuai tipe DATE di Postgres
         'start_date': DateFormat('yyyy-MM-dd').format(startDate!),
         'end_date': DateFormat('yyyy-MM-dd').format(endDate!),
-        'days': finalDays, // Sekarang mengirim INTEGER
+        'days': finalDays, 
         'total_price': totalPrice,
         'status': 'pending',
         'payment_status': 'unpaid',
         'payment_method': 'manual',
         'created_at': DateTime.now().toIso8601String(),
       };
-
-      // Pastikan di SupabaseService Anda menggunakan: supabase.from('pesan').insert(data)
       await service.createOrder(orderData);
+
+      // 2. Update stok di tabel 'products'
+      final int newStock = widget.product.stock - quantity;
+      await service.updateProductStock(widget.product.id, newStock);
+
+      // 3. Simpan ke tabel 'history'
+      final historyData = {
+        'user_id': 'guest-user', 
+        'product_id': widget.product.id,
+        'quantity': quantity,
+        'total_price': totalPrice,
+        'start_date': DateFormat('yyyy-MM-dd').format(startDate!),
+        'end_date': DateFormat('yyyy-MM-dd').format(endDate!),
+        'status': 'pending',
+        'created_at': DateTime.now().toIso8601String(),
+      };
+      await service.createHistory(historyData);
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Sewa Berhasil! Durasi: $finalDays hari'),
+          content: Text('Sewa Berhasil! Stok barang kini: $newStock'),
           backgroundColor: Colors.green,
         ),
       );
 
+      // Kembali ke halaman utama
       Navigator.popUntil(context, (route) => route.isFirst);
     } catch (e) {
       if (!mounted) return;
@@ -129,12 +143,10 @@ class _RentalFormPageState extends State<RentalFormPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header Info Produk
             Text(widget.product.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             Text('Harga: ${currency.format(widget.product.pricePerDay)} / hari'),
             const Divider(height: 30),
 
-            // Pilih Jumlah
             const Text('Jumlah Barang', style: TextStyle(fontWeight: FontWeight.bold)),
             Row(
               children: [
@@ -150,7 +162,6 @@ class _RentalFormPageState extends State<RentalFormPage> {
               ],
             ),
 
-            // Pilih Tanggal
             ListTile(
               leading: const Icon(Icons.date_range),
               title: Text(startDate == null ? 'Pilih Tanggal Mulai' : DateFormat('dd MMM yyyy').format(startDate!)),
@@ -167,7 +178,6 @@ class _RentalFormPageState extends State<RentalFormPage> {
 
             const SizedBox(height: 30),
             
-            // Ringkasan Bayar
             if (startDate != null && endDate != null) ...[
               Container(
                 padding: const EdgeInsets.all(16),

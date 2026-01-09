@@ -63,11 +63,22 @@ class _RentalFormPageState extends State<RentalFormPage> {
     }
   }
 
-  // FUNGSI SUBMIT: Pesan -> Update Stok -> Simpan Riwayat
+  // --- PERBAIKAN: LOGIKA SUBMIT DENGAN VALIDASI STOK ---
   Future<void> _submit() async {
     if (startDate == null || endDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Silakan pilih tanggal sewa terlebih dahulu')),
+      );
+      return;
+    }
+
+    // Perbaikan: Validasi jika input jumlah melebihi stok yang tersedia
+    if (quantity > widget.product.stock) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pesanan melebihi stock'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -78,7 +89,7 @@ class _RentalFormPageState extends State<RentalFormPage> {
       final int diff = endDate!.difference(startDate!).inDays;
       final int finalDays = diff <= 0 ? 1 : diff;
 
-      // 1. Simpan ke tabel 'pesan'
+      // 1. Simpan ke tabel 'pesan' dengan status 'paid'
       final orderData = {
         'product_id': widget.product.id,
         'quantity': quantity,
@@ -86,16 +97,16 @@ class _RentalFormPageState extends State<RentalFormPage> {
         'end_date': DateFormat('yyyy-MM-dd').format(endDate!),
         'days': finalDays, 
         'total_price': totalPrice,
-        'status': 'pending',
-        'payment_status': 'unpaid',
+        'status': 'paid', // Status langsung menjadi paid/di sewa
+        'payment_status': 'paid',
         'payment_method': 'manual',
         'created_at': DateTime.now().toIso8601String(),
       };
-      await service.createOrder(orderData);
+      await service.createOrder(orderData); //
 
-      // 2. Update stok di tabel 'products'
+      // 2. Update stok (mengurangi jumlah barang)
       final int newStock = widget.product.stock - quantity;
-      await service.updateProductStock(widget.product.id, newStock);
+      await service.updateProductStock(widget.product.id, newStock); //
 
       // 3. Simpan ke tabel 'history'
       final historyData = {
@@ -105,21 +116,20 @@ class _RentalFormPageState extends State<RentalFormPage> {
         'total_price': totalPrice,
         'start_date': DateFormat('yyyy-MM-dd').format(startDate!),
         'end_date': DateFormat('yyyy-MM-dd').format(endDate!),
-        'status': 'pending',
+        'status': 'paid',
         'created_at': DateTime.now().toIso8601String(),
       };
-      await service.createHistory(historyData);
+      await service.createHistory(historyData); //
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Sewa Berhasil! Stok barang kini: $newStock'),
+          content: Text('Sewa Berhasil! Pesanan diproses dengan status: PAID'),
           backgroundColor: Colors.green,
         ),
       );
 
-      // Kembali ke halaman utama
       Navigator.popUntil(context, (route) => route.isFirst);
     } catch (e) {
       if (!mounted) return;
@@ -144,7 +154,7 @@ class _RentalFormPageState extends State<RentalFormPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.product.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            Text('Harga: ${currency.format(widget.product.pricePerDay)} / hari'),
+            Text('Tersedia: ${widget.product.stock} unit'),
             const Divider(height: 30),
 
             const Text('Jumlah Barang', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -155,9 +165,21 @@ class _RentalFormPageState extends State<RentalFormPage> {
                   icon: const Icon(Icons.remove_circle),
                 ),
                 Text('$quantity', style: const TextStyle(fontSize: 20)),
+                // PERBAIKAN: Tombol tambah akan memunculkan pesan jika melebihi stok
                 IconButton(
-                  onPressed: quantity < widget.product.stock ? () => setState(() { quantity++; _updateTotal(); }) : null,
-                  icon: const Icon(Icons.add_circle),
+                  onPressed: () {
+                    if (quantity < widget.product.stock) {
+                      setState(() { 
+                        quantity++; 
+                        _updateTotal(); 
+                      });
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Pesanan melebihi stock')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.add_circle, color: Colors.blue),
                 ),
               ],
             ),
@@ -208,10 +230,15 @@ class _RentalFormPageState extends State<RentalFormPage> {
               height: 50,
               child: ElevatedButton(
                 onPressed: isLoading ? null : _submit,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: widget.product.stock > 0 ? Colors.blue : Colors.grey,
+                ),
                 child: isLoading 
                   ? const CircularProgressIndicator(color: Colors.white) 
-                  : const Text('Sewa Sekarang', style: TextStyle(color: Colors.white)),
+                  : Text(
+                      widget.product.stock > 0 ? 'Sewa Sekarang' : 'Stock Habis', 
+                      style: const TextStyle(color: Colors.white)
+                    ),
               ),
             )
           ],

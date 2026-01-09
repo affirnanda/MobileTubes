@@ -23,14 +23,40 @@ class SupabaseService {
     return await supabase
         .from('history')
         .select()
-        .eq('user_id', userId);
+        .order('created_at', ascending: false); // Urutkan dari yang terbaru
   }
   
-  // update stock
+  // Update stock (Pengurangan)
   Future<void> updateProductStock(String productId, int newStock) async {
-  await supabase
-      .from('products')
-      .update({'stock': newStock})
-      .eq('id', productId);
+    await supabase
+        .from('products')
+        .update({'stock': newStock})
+        .eq('id', productId);
+  }
+
+  // PERBAIKAN: Fungsi untuk mengembalikan stok (Penambahan)
+  Future<void> returnProductStock(String productId, int quantityReturned) async {
+    // Ambil stok saat ini terlebih dahulu
+    final response = await supabase
+        .from('products')
+        .select('stock')
+        .eq('id', productId)
+        .single();
+    
+    int currentStock = response['stock'] as int;
+    
+    // Update dengan stok baru
+    await supabase
+        .from('products')
+        .update({'stock': currentStock + quantityReturned})
+        .eq('id', productId);
+  }
+
+  // PERBAIKAN: Update status di tabel history
+  Future<void> updateHistoryStatus(String historyId, String status) async {
+    await supabase
+        .from('history')
+        .update({'status': status})
+        .eq('id', historyId);
   }
 }

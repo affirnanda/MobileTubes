@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/date_symbol_data_local.dart'; 
-import 'package:flutter_localizations/flutter_localizations.dart'; // 1. IMPORT INI
+import 'package:flutter_localizations/flutter_localizations.dart'; 
 import 'pages/product_page.dart';
 
 void main() async {
@@ -28,10 +28,10 @@ class MyApp extends StatelessWidget {
       title: 'SPORTMATE',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primaryColor: Colors.blue, // primarySwatch diganti primaryColor di Material3
+        primaryColor: Colors.blue, 
         useMaterial3: true,
       ),
-      // --- TAMBAHKAN KODE DI BAWAH INI ---
+
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -39,9 +39,9 @@ class MyApp extends StatelessWidget {
       ],
       supportedLocales: const [
         Locale('id', 'ID'), // Bahasa Indonesia
-        Locale('en', 'US'), // Bahasa Inggris (opsional sebagai cadangan)
+        Locale('en', 'US'), 
       ],
-      // -----------------------------------
+      
       home: const ProductPage(),
     );
   }
